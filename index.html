@@ -1,0 +1,1404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Platformer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, deleteDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase and Game functions globally for HTML events
+        window.initializeApp = initializeApp;
+        window.getAuth = getAuth;
+        window.getFirestore = getFirestore;
+        window.doc = doc;
+        window.setDoc = setDoc;
+        window.getDoc = getDoc;
+        window.deleteDoc = deleteDoc;
+        window.signInWithCustomToken = signInWithCustomToken;
+        window.signInAnonymously = signInAnonymously;
+        window.onAuthStateChanged = onAuthStateChanged;
+        window.setLogLevel = setLogLevel;
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0d1117; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+        }
+        .message-box {
+            position: relative; /* Added for the close button */
+            pointer-events: all;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 24px 40px;
+            border-radius: 12px;
+            text-align: center;
+            border: 2px solid #4ade80;
+            box-shadow: 0 0 20px rgba(74, 222, 128, 0.5);
+            animation: fadeIn 0.5s ease-out;
+            max-width: 400px;
+        }
+        /* Style for the new close button */
+        .close-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #4ade80;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 5px;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+        .close-button:hover {
+            color: #22c55e;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .title { font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; color: #4ade80; }
+        .subtitle { font-size: 1.25rem; margin-bottom: 1.5rem; }
+        .key-hint { margin-top: 1rem; font-size: 0.9rem; color: #9ca3af; }
+        .key-hint strong { color: white; background: rgba(255, 255, 255, 0.2); padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+        .restart-button {
+            background-color: #4ade80;
+            color: #0d1117;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px #22c55e;
+            border: none;
+        }
+        .restart-button:hover:not(:disabled) { background-color: #22c55e; box-shadow: 0 2px #16a34a; transform: translateY(2px); }
+        .restart-button:disabled { 
+            background-color: #374151; /* Gray background for disabled */
+            color: #9ca3af; /* Lighter text for disabled */
+            cursor: not-allowed;
+            box-shadow: none; 
+            transform: none;
+        }
+
+        .reset-button {
+            background-color: #f87171; /* Red/Pink color */
+            color: #7f1d1d;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px #ef4444;
+            border: none;
+            font-size: 0.9rem;
+        }
+        .reset-button:hover { background-color: #ef4444; box-shadow: 0 2px #b91c1c; transform: translateY(2px); }
+
+        /* New styles for the recording controls */
+        .control-button {
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            box-shadow: 0 3px rgba(0, 0, 0, 0.3);
+            font-size: 0.9rem;
+        }
+        .control-button:hover { transform: translateY(1px); box-shadow: 0 1px rgba(0, 0, 0, 0.2); }
+        
+        /* Style for required manual action */
+        .manual-download-required {
+            background-color: #f59e0b !important; /* Amber/Orange for warning/action required */
+            box-shadow: 0 3px #d97706 !important;
+        }
+        
+        /* New Style for Level Progression Message */
+        #levelMessage {
+            position: absolute;
+            top: 10%;
+            display: none;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 100;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border: 2px solid #4ade80;
+            box-shadow: 0 0 15px rgba(74, 222, 128, 0.5);
+            text-shadow: 0 0 5px #4ade80;
+            opacity: 0; /* Starts hidden, fade in on trigger */
+        }
+        
+        /* Style for the name input field */
+        .message-box .name-input {
+            color: #0d1117;
+            background-color: #ffffff;
+            border: 2px solid #4ade80;
+            padding: 10px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 250px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 1rem;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
+            transition: all 0.2s ease;
+        }
+        .message-box .name-input:focus {
+            outline: none;
+            border-color: #22c55e;
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.5);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <!-- Temporary, non-blocking message for level progress -->
+        <div id="levelMessage" style="display: none;"></div>
+
+        <!-- Main game start/end message box (Shows loading until Firebase is ready) -->
+        <div id="message" class="message-box" style="display: block;">
+            <div class="title">Loading Game...</div>
+            <div class="subtitle">Connecting to persistent storage.</div>
+        </div>
+    </div>
+    
+    <!-- Floating Controls for Recording -->
+    <div id="controls" style="position: absolute; bottom: 20px; left: 20px; z-index: 20; display: none; pointer-events: all; display: flex; align-items: center;">
+        <button id="recordButton" class="control-button bg-red-600 hover:bg-red-700 shadow-red-800" onclick="startRecording()">🔴 Record Gameplay</button>
+        <button id="stopButton" class="control-button bg-gray-500 hover:bg-gray-600 shadow-gray-700 ml-2" style="display:none;" onclick="stopRecording()">◼️ Stop & Download</button>
+        
+        <!-- Manual Download Link -->
+        <div id="downloadMessage" class="ml-4 text-white px-3 py-2 rounded-lg font-semibold shadow-md bg-yellow-600" style="display:none; transition: background 0.3s;">
+            <a id="downloadLink" href="#" style="color: white; text-decoration: none; display: block; font-size: 1.0rem;" download="gameplay.webm">Download Ready! Click Here.</a>
+        </div>
+    </div>
+
+
+    <script type="module">
+        // --- Core Three.js Setup ---
+        let scene, camera, renderer;
+        let player, playerVelocity = new THREE.Vector3();
+        let controls = { forward: false, backward: false, left: false, right: false, jump: false };
+        let isGrounded = false;
+        let lastUpdateTime = performance.now();
+        
+        // --- NEW CAMERA STATE ---
+        let isFirstPerson = false;
+        
+        // --- Global Mesh References ---
+        let crown; // Reference for the crown mesh
+        
+        // --- Game Constants ---
+        const TOTAL_PLATFORMS = 100; 
+        const PLATFORMS_PER_LEVEL = 20; 
+        
+        // Physics Constants
+        const GRAVITY = -9.8;
+        const PLAYER_SPEED = 0.10; 
+        const JUMP_FORCE = 5.0;    
+        const DAMPING_FACTOR = 0.75; 
+        const ROTATION_SMOOTHING = 0.15; 
+        const COYOTE_TIME_FRAMES = 8; 
+
+        const PLAYER_HEIGHT = 0.8;
+        const PLAYER_RADIUS = 0.2;
+        const CAMERA_DISTANCE = 4.0;
+        const CAMERA_HEIGHT = 2.0;
+        const COLLISION_EPSILON = 0.005; 
+        const PLAYER_START_Y = 5.65; 
+        
+        // --- Cheat Code Variables (NEW) ---
+        const CHEAT_SEQUENCE = ['A', 'R', 'C', 'H', 'A', 'N', 'A'];
+        let cheatCodeIndex = 0;
+        const TARGET_LEVEL_START_INDEX = 60; // Platform 60 is the start of Level 4
+
+        let graceFramesRemaining = 0;
+        let platforms = [];
+        let isGameActive = false;
+        let finishLine;
+        
+        // --- Checkpoint Tracking (Initialized to safe defaults) ---
+        let checkpointPosition = new THREE.Vector3(0, PLAYER_START_Y, 0); 
+        let checkpointPlatformIndex = -1; 
+        let startPlatform; // Reference to the first platform
+        
+        // --- Level Tracking ---
+        let currentLevelIndex = 0; 
+        
+        // --- Custom State Variables for Grounding Stability ---
+        let currentGroundedPlatform = null; 
+        let coyoteTimeRemaining = 0; 
+        
+        // --- Media Recording Variables ---
+        let mediaRecorder;
+        let recordedChunks = [];
+        let recordingStartTime;
+
+        // --- Firebase/Auth Variables ---
+        let db, auth;
+        let isAuthReady = false;
+        let isProgressLoaded = false; // Synchronization flag
+        let userId = 'anonymous';
+        let displayName = 'Player'; // Holds the player's chosen name
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- Firebase Path Definitions ---
+        // Private Data Path (Used only to save the player's name for auto-fill on this device)
+        const nameDocPath = (uid) => `artifacts/${appId}/users/${uid}/game_metadata/profile`;
+        
+        // Public Data Path (Used for cross-device game progress, indexed by normalized name)
+        const progressDocPath = (normalizedName) => 
+            `artifacts/${appId}/public/data/obby_progress_by_name/${normalizedName}`;
+
+        /**
+         * Normalizes the display name for use as a Firestore document ID.
+         * @param {string} name 
+         * @returns {string} Normalized name (lowercase, spaces to hyphens, safe chars only)
+         */
+        function getNormalizedName(name) {
+            if (!name) return 'anonymous-player';
+            return name
+                .toLowerCase()
+                .trim()
+                .replace(/\s+/g, '-') // Replace spaces with hyphens
+                .replace(/[^a-z0-9-_]/g, ''); // Remove special characters
+        }
+        
+        /**
+         * Calculates the precise, centered spawn position on a given platform.
+         * Updates checkpointPosition and checkpointPlatformIndex based on the platform.
+         */
+        function setCheckpointToPlatformCenter(platform, index) {
+            const platformHeight = platform.geometry.parameters.height !== undefined ? platform.geometry.parameters.height : 0.5;
+            const platformTopY = platform.position.y + platformHeight / 2;
+            
+            checkpointPosition.set(
+                platform.position.x, 
+                platformTopY + (PLAYER_HEIGHT / 2) + COLLISION_EPSILON, // Add epsilon to prevent immediate sink
+                platform.position.z
+            );
+            checkpointPlatformIndex = index;
+            
+            // --- DEBUG LOGGING ---
+            console.log(`[Checkpoint Set] Index: ${index}, Platform Y: ${platform.position.y.toFixed(2)}, Checkpoint Pos: (${checkpointPosition.x.toFixed(2)}, ${checkpointPosition.y.toFixed(2)}, ${checkpointPosition.z.toFixed(2)})`);
+        }
+
+
+        // --- Firebase Progress Handling (Uses Normalized Name) ---
+
+        /**
+         * Loads the saved display name from the user's private profile.
+         */
+        async function loadDisplayName() {
+            if (!isAuthReady || !db || userId === 'anonymous') {
+                return false;
+            }
+            try {
+                const docRef = doc(db, nameDocPath(userId));
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists() && docSnap.data().displayName) {
+                    displayName = docSnap.data().displayName;
+                    console.log("Name Load: Found private name:", displayName);
+                    return true;
+                }
+            } catch (e) {
+                console.error("Error loading display name:", e);
+            }
+            return false;
+        }
+
+        /**
+         * Saves the display name to the user's private profile.
+         */
+        async function saveDisplayName() {
+            if (!isAuthReady || !db || userId === 'anonymous') {
+                console.warn("Name Save Aborted: Firebase Auth not ready.");
+                return;
+            }
+            try {
+                const docRef = doc(db, nameDocPath(userId));
+                await setDoc(docRef, { displayName: displayName });
+                console.log("Name Saved to private profile:", displayName);
+            } catch (e) {
+                console.error("Error saving display name:", e);
+            }
+        }
+
+        /**
+         * Saves the current checkpoint progress to the public collection using the normalized name.
+         * We save the precise position for faster respawn, but rely on index for load-in accuracy.
+         */
+        async function saveProgress() {
+            if (!isAuthReady || !db || displayName === 'Player') {
+                console.warn("Progress Save Aborted: Name not set or Firebase not ready.");
+                return;
+            }
+
+            const normalizedName = getNormalizedName(displayName);
+
+            const progressData = {
+                checkpointPlatformIndex: checkpointPlatformIndex,
+                // Save current position for quick respawn after fall, even if not perfectly centered
+                checkpointPosition: { 
+                    x: player.position.x, 
+                    y: player.position.y, 
+                    z: player.position.z 
+                },
+                lastUpdateTime: Date.now(),
+                displayName: displayName 
+            };
+
+            try {
+                const docRef = doc(db, progressDocPath(normalizedName));
+                await setDoc(docRef, progressData);
+                console.log(`Progress Saved: Checkpoint Index ${checkpointPlatformIndex} under public key ${normalizedName}`);
+            } catch (e) {
+                console.error("Error saving public progress:", e);
+            }
+        }
+        
+        /**
+         * Loads the checkpoint progress from the public collection using the normalized name.
+         * It recalculates the precise start position from the platform mesh.
+         * @returns {number} The loaded checkpoint index, or -1 if no progress was found.
+         */
+        async function loadProgress() {
+            if (!isAuthReady || !db || displayName === 'Player' || platforms.length === 0) {
+                return -1;
+            }
+            
+            const normalizedName = getNormalizedName(displayName);
+
+            try {
+                const docRef = doc(db, progressDocPath(normalizedName));
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    
+                    if (data.checkpointPlatformIndex !== undefined && data.checkpointPlatformIndex >= 0) {
+                        const loadedIndex = data.checkpointPlatformIndex;
+                        
+                        if (platforms[loadedIndex]) {
+                            // --- LOGIC: Calculate precise start position from the platform mesh ---
+                            setCheckpointToPlatformCenter(platforms[loadedIndex], loadedIndex);
+                            currentLevelIndex = loadedIndex; 
+                            
+                            console.log(`Progress Load: SUCCESS! Loaded checkpoint index ${loadedIndex}.`);
+                            return loadedIndex;
+                        } else {
+                            console.error("Loaded index found, but platform array is incomplete.");
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Error loading public progress:", e);
+            }
+            console.log("Progress Load: No existing public progress found for this name.");
+            return -1;
+        }
+
+        /**
+         * Deletes the user's public save file (and optionally the private name file).
+         * @param {boolean} resetName If true, also clears the private displayName cache.
+         */
+        window.resetProgress = async (resetName = false) => {
+            if (!isAuthReady || !db || displayName === 'Player') {
+                console.error("Cannot reset: Name not set, Auth not ready, or Firestore not initialized.");
+                return;
+            }
+            
+            const normalizedName = getNormalizedName(displayName);
+
+            try {
+                // 1. Delete the public progress document
+                const publicDocRef = doc(db, progressDocPath(normalizedName));
+                await deleteDoc(publicDocRef);
+                
+                // 2. Delete the private name document if requested
+                if (resetName) {
+                    const privateDocRef = doc(db, nameDocPath(userId));
+                    await deleteDoc(privateDocRef);
+                    displayName = 'Player';
+                }
+
+                // 3. Reset local state
+                resetLocalStateToStart();
+                
+                updateMessageForStart();
+                console.log("Progress Reset: Successfully deleted save file and set game to start position.");
+
+            } catch (e) {
+                console.error("Error resetting progress:", e);
+            }
+        };
+
+        /**
+         * Resets local game state variables to platform 0 (Start).
+         */
+        function resetLocalStateToStart() {
+            // Use the utility function to calculate a perfect start point
+            if (startPlatform) {
+                setCheckpointToPlatformCenter(startPlatform, 0);
+                currentLevelIndex = 0;
+            } else {
+                // Fallback, though startPlatform should be defined before this runs
+                checkpointPlatformIndex = 0;
+                checkpointPosition.set(0, PLAYER_START_Y, 0); 
+                currentLevelIndex = 0;
+            }
+        }
+
+        /**
+         * Shows the main game message (Start/Win/Fail/Loaded).
+         * @param {boolean} progressFound If true, shows the Continue/Restart choice.
+         */
+        function updateMessageForStart(progressFound = false) {
+            const messageDiv = document.getElementById('message');
+            
+            // 1. Loading State (Initial)
+            if (!isProgressLoaded) {
+                 messageDiv.innerHTML = `
+                    <div class="title">Loading Game...</div>
+                    <div class="subtitle">Connecting to persistent storage.</div>
+                 `;
+                 messageDiv.style.display = 'block';
+                 return;
+            }
+
+            // 2. Name Input Required State (If no name is set yet)
+            if (displayName === 'Player') {
+                messageDiv.innerHTML = `
+                    <div class="title">Welcome, New Challenger!</div>
+                    <div class="subtitle">Enter your name to load or start your Obby progress:</div>
+                    <input type="text" id="playerNameInput" placeholder="Your Name" 
+                           class="name-input" maxlength="20" autofocus/>
+                    <button class="restart-button" id="nameStartButton" onclick="window.setPlayerNameAndLoad()">
+                        Load/Set Name & Continue
+                    </button>
+                    <div class="key-hint">Your progress is saved under this name and accessible across devices.</div>
+                    <div class="user-id-display mt-4 text-xs text-gray-400">System User ID: ${userId}</div>
+                `;
+                messageDiv.style.display = 'block';
+                setTimeout(() => {
+                    const input = document.getElementById('playerNameInput');
+                    if (input) input.focus();
+                }, 100);
+                return; 
+            }
+            
+            // 3. Progress Found - Offer Choice (NEW)
+            if (progressFound) {
+                 const isFinished = checkpointPlatformIndex === TOTAL_PLATFORMS;
+                 const continueText = isFinished ? "Replay Game (You Won!)" : `Continue from Platform ${checkpointPlatformIndex + 1}`;
+                 
+                 messageDiv.innerHTML = `
+                    <div class="title">Progress Found!</div>
+                    <div class="subtitle">Welcome back, ${displayName}. What would you like to do?</div>
+                    <div class="flex flex-col space-y-4">
+                        <button class="restart-button" onclick="window.startGame(false)">
+                            ${continueText}
+                        </button>
+                        <button class="reset-button" onclick="window.startGame(true)">
+                            Restart from Platform 1
+                        </button>
+                    </div>
+                    <div class="user-id-display mt-4 text-xs text-gray-400">Playing as: ${displayName} | Progress Key: ${getNormalizedName(displayName)}</div>
+                 `;
+                 messageDiv.style.display = 'block';
+                 return;
+            }
+
+
+            // 4. Fresh Start State (No progress found OR after a restart)
+            let title = `Welcome, ${displayName}!`;
+            let text = "Navigate the platforms and reach the end!";
+            
+            messageDiv.innerHTML = `
+                <div class="title">${title}</div>
+                <div class="subtitle">${text}</div>
+                <button class="restart-button" id="startButton" onclick="window.startGame(true)">
+                    Start New Game
+                </button>
+                <div class="key-hint">Use <strong>W A S D</strong> or <strong>Arrow Keys</strong> to move, <strong>SPACE</strong> to jump. Press <strong>C</strong> to toggle camera view.</div>
+                <div class="user-id-display mt-4 text-xs text-gray-400">Playing as: ${displayName} | Progress Key: ${getNormalizedName(displayName)}</div>
+            `;
+            messageDiv.style.display = 'block';
+        }
+
+        /**
+         * Hides the main game message box and sets game activity status.
+         * Used by the new 'X' button.
+         */
+        window.hideMessage = () => {
+            document.getElementById('message').style.display = 'none';
+            // Resume/set game state only if it was the win/game over message
+            // and we weren't already waiting for user input (like name).
+            if (displayName !== 'Player' && checkpointPlatformIndex >= 0) {
+                 isGameActive = true; 
+                 graceFramesRemaining = 0; // Prevent movement lockout
+                 playerVelocity.set(0, 0, 0); // Stop any residual movement
+            }
+        };
+        
+        /**
+         * Shows the main game message (Start/Win/Fail/Loaded).
+         */
+        function showMessage(title, text, isGameOver = false) {
+            const messageDiv = document.getElementById('message');
+            
+            let buttonText = isGameOver ? "Try Again" : "Start Game";
+            
+            // Add the close button for the CONGRATULATIONS message (when index is TOTAL_PLATFORMS)
+            const isFinished = checkpointPlatformIndex === TOTAL_PLATFORMS;
+            const closeButtonHTML = isFinished ? 
+                `<button class="close-button" onclick="window.hideMessage()">X</button>` : 
+                '';
+
+            messageDiv.innerHTML = `
+                ${closeButtonHTML}
+                <div class="title">${title}</div>
+                <div class="subtitle">${text}</div>
+                <button class="restart-button" onclick="window.startGame(false)">${buttonText}</button>
+                <div class="key-hint">Use <strong>W A S D</strong> or <strong>Arrow Keys</strong> to move, <strong>SPACE</strong> to jump. Press <strong>C</strong> to toggle camera view.</div>
+                ${checkpointPlatformIndex > 0 ? `<button class="reset-button mt-4" onclick="window.resetProgress(false)">Reset Progress</button>` : ''}
+                <div class="user-id-display mt-4 text-xs text-gray-400">Playing as: ${displayName} | Progress Key: ${getNormalizedName(displayName)}</div>
+            `;
+            messageDiv.style.display = 'block';
+        }
+        
+        
+        // --- Game Initialization ---
+
+        async function init() {
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); 
+            scene.fog = new THREE.Fog(0x87ceeb, 10, 150); 
+
+            // Camera Setup (Third Person)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            // Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true; 
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(5, 10, 7.5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 200; 
+            directionalLight.shadow.camera.left = -15;
+            directionalLight.shadow.camera.right = 15;
+            directionalLight.shadow.camera.top = 15;
+            directionalLight.shadow.camera.bottom = -15;
+            scene.add(directionalLight);
+
+
+            // --- Player Creation ---
+            const playerGroup = new THREE.Group();
+            const bodyGeometry = new THREE.CylinderGeometry(PLAYER_RADIUS, PLAYER_RADIUS, PLAYER_HEIGHT, 12);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x1e40af }); 
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.y = PLAYER_HEIGHT / 2; 
+            body.castShadow = true;
+            playerGroup.add(body);
+
+            const headGeometry = new THREE.SphereGeometry(PLAYER_RADIUS * 0.7, 16, 16);
+            const headMaterial = new THREE.MeshPhongMaterial({ color: 0xe0e7ff }); 
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.y = PLAYER_HEIGHT + PLAYER_RADIUS * 0.6;
+            head.castShadow = true;
+            playerGroup.add(head);
+
+            player = playerGroup;
+            player.position.set(0, PLAYER_START_Y, 0); 
+            scene.add(player);
+
+            // --- Crown Creation ---
+            const crownGeometry = new THREE.TorusGeometry(0.5, 0.1, 8, 30);
+            const crownMaterial = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0xffa500 });
+            crown = new THREE.Mesh(crownGeometry, crownMaterial);
+            
+            crown.position.y = PLAYER_HEIGHT + PLAYER_RADIUS * 0.7 + 0.5;
+            crown.rotation.x = Math.PI / 2; 
+            crown.scale.set(0.6, 0.6, 0.6); 
+            crown.castShadow = true;
+            crown.visible = false; 
+            player.add(crown); 
+            
+            snapCameraToPlayer();
+
+            // --- Obby Creation ---
+            createObby();
+            
+            // --- Firebase Setup ---
+            try {
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                setLogLevel('debug'); 
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        userId = 'anonymous';
+                    }
+                    
+                    isAuthReady = true;
+
+                    // 1. Try to load the name they used last time on THIS device (Private Data)
+                    await loadDisplayName();
+                    
+                    // 2. Set the initial local state (platform 0)
+                    resetLocalStateToStart();
+
+                    // 3. If a name was found, try to load their global progress (Public Data)
+                    let progressFoundIndex = -1;
+                    if (displayName !== 'Player') {
+                        progressFoundIndex = await loadProgress();
+                    }
+                    
+                    isProgressLoaded = true; 
+                    // Pass the progress state to determine the starting message
+                    updateMessageForStart(progressFoundIndex >= 0);
+                });
+
+                // Custom Token Sign In (MANDATORY)
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                // Fallback if Firebase fails entirely
+                isAuthReady = true; 
+                isProgressLoaded = true; 
+                userId = 'fallback-user';
+                resetLocalStateToStart();
+                updateMessageForStart(false);
+                console.warn("Firebase failed to initialize. Progress saving is disabled.");
+            }
+            
+            setupRecording();
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('keydown', onKeyDown, false);
+            document.addEventListener('keyup', onKeyUp, false);
+
+            animate();
+        }
+
+        /**
+         * Teleports the player to the specified platform index and sets it as the new checkpoint.
+         * @param {number} platformIndex 
+         */
+        function teleportToLevel(platformIndex) {
+            if (platformIndex >= platforms.length || platformIndex < 0) {
+                console.error("Invalid platform index for teleport.");
+                return;
+            }
+
+            // 1. Get the target platform mesh
+            const targetPlatform = platforms[platformIndex];
+            
+            // 2. Update checkpoint state
+            setCheckpointToPlatformCenter(targetPlatform, platformIndex);
+            currentLevelIndex = platformIndex;
+            
+            // 3. Teleport player (use the newly calculated checkpointPosition)
+            player.position.copy(checkpointPosition);
+            
+            // 4. Reset physics/game state for smooth continuation
+            playerVelocity.set(0, 0, 0); 
+            isGrounded = true;
+            currentGroundedPlatform = targetPlatform;
+            snapCameraToPlayer();
+            
+            // 5. Notify player (and save progress if applicable)
+            showLevelMessage(platformIndex); 
+            saveProgress(); 
+            
+            console.log(`[Cheat Activated] Teleported to Platform Index ${platformIndex} (Start of Level ${platformIndex / PLATFORMS_PER_LEVEL + 1}).`);
+        }
+        
+        // --- Utility Functions (createPlatform, createFlag, createObby, etc.) ---
+        
+        function checkCollision(playerPos, platform) {
+            const playerHalfHeight = PLAYER_HEIGHT / 2;
+            
+            const playerMin = new THREE.Vector3(
+                playerPos.x - PLAYER_RADIUS, 
+                playerPos.y - playerHalfHeight, 
+                playerPos.z - PLAYER_RADIUS
+            );
+            const playerMax = new THREE.Vector3(
+                playerPos.x + PLAYER_RADIUS, 
+                playerPos.y + playerHalfHeight, 
+                playerPos.z + PLAYER_RADIUS
+            );
+
+            const platformMin = new THREE.Vector3();
+            const platformMax = new THREE.Vector3();
+            
+            if (!platform.geometry.boundingBox) {
+                platform.geometry.computeBoundingBox();
+            }
+
+            platformMin.copy(platform.geometry.boundingBox.min).add(platform.position);
+            platformMax.copy(platform.geometry.boundingBox.max).add(platform.position);
+
+            const overlapX = playerMax.x > platformMin.x && playerMin.x < platformMax.x;
+            const overlapY = playerMax.y > platformMin.y && playerMin.y < platformMax.y;
+            const overlapZ = playerMax.z > platformMin.z && playerMin.z < platformMax.z;
+
+            return overlapX && overlapY && overlapZ;
+        }
+
+        function snapCameraToPlayer() {
+            // Logic for snapping the camera in first or third person (omitted for brevity)
+            if (!isFirstPerson) {
+                const angle = player.rotation.y; 
+                const cameraTargetX = player.position.x - CAMERA_DISTANCE * Math.sin(angle);
+                const cameraTargetZ = player.position.z - CAMERA_DISTANCE * Math.cos(angle);
+                const cameraTargetY = player.position.y + CAMERA_HEIGHT;
+                camera.position.set(cameraTargetX, cameraTargetY, cameraTargetZ);
+                const lookAtTarget = new THREE.Vector3(player.position.x, player.position.y + PLAYER_HEIGHT * 0.5, player.position.z);
+                camera.lookAt(lookAtTarget);
+            } else {
+                const eyeLevelY = player.position.y + PLAYER_HEIGHT * 0.7; 
+                camera.position.set(player.position.x, eyeLevelY, player.position.z);
+                const lookDirection = new THREE.Vector3(0, 0, 1);
+                lookDirection.applyEuler(player.rotation); 
+                const lookTarget = new THREE.Vector3().addVectors(player.position, lookDirection.multiplyScalar(5));
+                lookTarget.y = eyeLevelY;
+                camera.lookAt(lookTarget);
+            }
+        }
+        
+        function showLevelMessage(platformIndex) {
+            const levelMsgDiv = document.getElementById('levelMessage');
+            // Assuming 20 platforms per level, level 1 starts after platform 0, level 2 after platform 20, etc.
+            const levelNumber = Math.floor(platformIndex / PLATFORMS_PER_LEVEL) + 1;
+            
+            let messageText;
+            if (platformIndex === TOTAL_PLATFORMS) { 
+                 messageText = `Level ${TOTAL_PLATFORMS / PLATFORMS_PER_LEVEL} Complete! You reached the FINISH LINE!`;
+            } else if (platformIndex === TARGET_LEVEL_START_INDEX) {
+                 messageText = `Cheat Activated: Welcome to Level ${levelNumber}!`;
+            } else {
+                messageText = `Checkpoint Saved! Proceed to Level ${levelNumber}!`; 
+            }
+
+            levelMsgDiv.textContent = messageText;
+            levelMsgDiv.style.display = 'block';
+            levelMsgDiv.style.transition = 'none';
+            levelMsgDiv.style.opacity = '1';
+
+            setTimeout(() => {
+                levelMsgDiv.style.transition = 'opacity 1s ease-out';
+                levelMsgDiv.style.opacity = '0';
+                
+                setTimeout(() => {
+                    levelMsgDiv.style.display = 'none';
+                    levelMsgDiv.style.transition = 'none'; 
+                }, 1000); 
+            }, 3000); 
+        }
+
+        function toggleCameraMode() {
+            isFirstPerson = !isFirstPerson;
+            player.visible = !isFirstPerson; 
+            if (crown) {
+                 crown.visible = !isFirstPerson && checkpointPlatformIndex === TOTAL_PLATFORMS; 
+            }
+            snapCameraToPlayer(); 
+        }
+
+        function createPlatform(x, y, z, width, depth, color) {
+            const geometry = new THREE.BoxGeometry(width, 0.5, depth);
+            const material = new THREE.MeshPhongMaterial({ color: color });
+            const platform = new THREE.Mesh(geometry, material);
+            platform.position.set(x, y, z);
+            platform.receiveShadow = true;
+            platform.castShadow = true;
+            platforms.push(platform);
+            scene.add(platform);
+            return platform;
+        }
+
+        function createFlag(platform, colorHex) {
+            const platformTopY = platform.position.y + 0.25; 
+            const flagPoleGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.5, 8);
+            const flagPoleMat = new THREE.MeshPhongMaterial({ color: 0x888888 }); 
+            const flagPole = new THREE.Mesh(flagPoleGeo, flagPoleMat);
+            
+            flagPole.position.set(
+                platform.position.x, 
+                platformTopY + 1.5 / 2, 
+                platform.position.z + (platform.geometry.parameters.depth / 2) - 0.1 
+            ); 
+            scene.add(flagPole);
+
+            const flagGeo = new THREE.BoxGeometry(0.8, 0.4, 0.02);
+            const flagMat = new THREE.MeshPhongMaterial({ color: colorHex });
+            const flag = new THREE.Mesh(flagGeo, flagMat);
+            
+            flag.position.set(
+                platform.position.x + 0.4, 
+                platformTopY + 1.3, 
+                flagPole.position.z 
+            ); 
+            scene.add(flag);
+        }
+
+        function createObby() {
+            scene.children.forEach(child => {
+                 if (child.isMesh && child !== player && !player.children.includes(child)) {
+                    scene.remove(child);
+                 }
+            });
+            platforms = [];
+
+            startPlatform = createPlatform(0, 5, 0, 10, 10, 0x4ade80); 
+            let currentZ = 0;
+
+            for (let i = 1; i <= TOTAL_PLATFORMS; i++) {
+                let width, depth, gap, heightChange;
+
+                if (i <= TOTAL_PLATFORMS / 2) {
+                    width = THREE.MathUtils.randFloat(1.5, 3.0);
+                    depth = THREE.MathUtils.randFloat(1.5, 3.0);
+                    gap = THREE.MathUtils.randFloat(2.5, 4.0); 
+                    heightChange = THREE.MathUtils.randFloat(0.3, 0.8);
+                } else {
+                    width = THREE.MathUtils.randFloat(1.0, 2.5); 
+                    depth = THREE.MathUtils.randFloat(1.0, 2.5);
+                    gap = THREE.MathUtils.randFloat(3.5, 6.0); 
+                    heightChange = THREE.MathUtils.randFloat(0.5, 1.2); 
+                }
+
+                currentZ += gap + depth / 2; 
+                const x = THREE.MathUtils.randFloatSpread(i <= TOTAL_PLATFORMS / 2 ? 3 : 4); 
+                const y = platforms[platforms.length - 1].position.y + heightChange;
+                
+                let platform;
+
+                if (i === TOTAL_PLATFORMS) {
+                    const finishY = platforms[platforms.length - 1].position.y + 0.5;
+                    currentZ += 5;
+                    platform = createPlatform(0, finishY, currentZ, 4, 4, 0xffd700); 
+                    finishLine = platform;
+                    
+                    const finishPoleGeo = new THREE.CylinderGeometry(0.05, 0.05, 3, 8);
+                    const finishPoleMat = new THREE.MeshPhongMaterial({ color: 0x888888 });
+                    const finishPole = new THREE.Mesh(finishPoleGeo, finishPoleMat);
+                    finishPole.position.set(0, finishLine.position.y + 1.75, currentZ - 1.5); 
+                    scene.add(finishPole);
+
+                    const finishFlagGeo = new THREE.BoxGeometry(1.5, 0.8, 0.05);
+                    const finishFlagMat = new THREE.MeshPhongMaterial({ color: 0xff0000 }); 
+                    const finishFlag = new THREE.Mesh(finishFlagGeo, finishFlagMat);
+                    finishFlag.position.set(0.75, finishLine.position.y + 2.7, currentZ - 1.5); 
+                    scene.add(finishFlag);
+                } else {
+                    const color = new THREE.Color().setHSL(Math.random(), 0.8, 0.6); 
+                    platform = createPlatform(x, y, currentZ, width, depth, color.getHex());
+
+                    if (i % PLATFORMS_PER_LEVEL === 0) {
+                        createFlag(platform, 0x3b82f6);
+                    }
+                }
+            }
+        }
+
+        function onKeyDown(event) {
+            if (event.repeat) return; 
+            
+            // --- CHEAT CODE INPUT CHECK ---
+            if (isGameActive) {
+                const key = event.key.toUpperCase();
+                
+                if (key === CHEAT_SEQUENCE[cheatCodeIndex]) {
+                    cheatCodeIndex++;
+                    if (cheatCodeIndex === CHEAT_SEQUENCE.length) {
+                        teleportToLevel(TARGET_LEVEL_START_INDEX);
+                        cheatCodeIndex = 0; // Reset index after successful sequence
+                    }
+                } else if (key === CHEAT_SEQUENCE[0]) {
+                     // If the first key of the sequence is pressed after a failure, restart the sequence.
+                     cheatCodeIndex = 1;
+                }
+                else {
+                    // Reset if the wrong key is pressed, but only if we were already in a sequence
+                    if (cheatCodeIndex > 0) {
+                        cheatCodeIndex = 0; 
+                    }
+                }
+            }
+
+
+            switch (event.code) {
+                case 'KeyW': 
+                case 'ArrowUp': controls.forward = true; break;
+                case 'KeyS': 
+                case 'ArrowDown': controls.backward = true; break;
+                case 'KeyA': 
+                case 'ArrowLeft': controls.left = true; break;
+                case 'KeyD': 
+                case 'ArrowRight': controls.right = true; break;
+                case 'Space':
+                    if (isGameActive) { controls.jump = true; }
+                    break;
+                case 'KeyC': 
+                    if (isGameActive) { toggleCameraMode(); }
+                    break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'KeyW': case 'ArrowUp': controls.forward = false; break;
+                case 'KeyS': case 'ArrowDown': controls.backward = false; break;
+                case 'KeyA': case 'ArrowLeft': controls.left = false; break;
+                case 'KeyD': case 'ArrowRight': controls.right = false; break;
+                case 'Space': break;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Game Loop and Physics (UpdatePlayer, UpdateCamera, Animate) ---
+
+        function updatePlayer(deltaTime) {
+            
+            if (graceFramesRemaining > 0) {
+                 playerVelocity.y = 0;
+            }
+
+            if (isGrounded && !controls.jump && currentGroundedPlatform) {
+                const platformHeight = currentGroundedPlatform.geometry.parameters.height !== undefined ? currentGroundedPlatform.geometry.parameters.height : 0.5;
+                const platformTopY = currentGroundedPlatform.position.y + platformHeight / 2;
+                player.position.y = platformTopY + (PLAYER_HEIGHT / 2);
+                playerVelocity.y = 0;
+            }
+
+            if (!isGrounded) {
+                playerVelocity.y += GRAVITY * deltaTime;
+                if (coyoteTimeRemaining > 0) { coyoteTimeRemaining--; }
+            }
+
+            isGrounded = false; 
+            let platformLandedOnThisFrame = null; 
+
+            const inputVector = new THREE.Vector3(0, 0, 0);
+            if (controls.forward) inputVector.z -= 1;
+            if (controls.backward) inputVector.z += 1;
+            if (controls.left) inputVector.x -= 1;
+            if (controls.right) inputVector.x += 1;
+
+            if (inputVector.lengthSq() > 0) {
+                inputVector.normalize();
+                const angle = Math.atan2(camera.position.x - player.position.x, camera.position.z - player.position.z);
+                const rotationMatrix = new THREE.Matrix4().makeRotationY(angle);
+                inputVector.applyMatrix4(rotationMatrix);
+
+                playerVelocity.x = inputVector.x * PLAYER_SPEED * 60;
+                playerVelocity.z = inputVector.z * PLAYER_SPEED * 60;
+
+                const targetAngle = Math.atan2(inputVector.x, inputVector.z);
+                player.rotation.y = THREE.MathUtils.lerp(player.rotation.y, targetAngle, ROTATION_SMOOTHING);
+
+            } else {
+                if (currentGroundedPlatform) {
+                    playerVelocity.x *= DAMPING_FACTOR; 
+                    playerVelocity.z *= DAMPING_FACTOR;
+                } else {
+                    playerVelocity.x *= 0.98;
+                    playerVelocity.z *= 0.98;
+                }
+            }
+
+            if (controls.jump && (currentGroundedPlatform || coyoteTimeRemaining > 0)) {
+                playerVelocity.y = JUMP_FORCE;
+                controls.jump = false;
+                currentGroundedPlatform = null;
+                coyoteTimeRemaining = 0; 
+            }
+
+            player.position.x += playerVelocity.x * deltaTime;
+            player.position.y += playerVelocity.y * deltaTime;
+            player.position.z += playerVelocity.z * deltaTime;
+
+            const playerBottomY = player.position.y - (PLAYER_HEIGHT / 2);
+
+            for (let i = 0; i < platforms.length; i++) {
+                const platform = platforms[i];
+                if (checkCollision(player.position, platform)) {
+                    const platformHeight = platform.geometry.parameters.height !== undefined ? platform.geometry.parameters.height : 0.5;
+                    const platformTopY = platform.position.y + platformHeight / 2;
+
+                    if (playerVelocity.y <= 0) { 
+                        if (playerBottomY < platformTopY + COLLISION_EPSILON) {
+                            playerVelocity.y = 0;
+                            player.position.y = platformTopY + (PLAYER_HEIGHT / 2); 
+                            isGrounded = true;
+                            platformLandedOnThisFrame = platform;
+                            coyoteTimeRemaining = COYOTE_TIME_FRAMES; 
+                            
+                            
+                            const newLevelIndex = i; 
+                            if (newLevelIndex > currentLevelIndex) {
+                                currentLevelIndex = newLevelIndex;
+                                
+                                // Checkpoint Logic (every 20 platforms)
+                                if (newLevelIndex > 0 && newLevelIndex % PLATFORMS_PER_LEVEL === 0 && newLevelIndex < TOTAL_PLATFORMS) {
+                                    
+                                    const checkpointPlatform = platforms[newLevelIndex];
+                                    // Use utility to set checkpoint exactly on the platform center
+                                    setCheckpointToPlatformCenter(checkpointPlatform, newLevelIndex);
+                                    
+                                    showLevelMessage(newLevelIndex);
+                                    saveProgress(); 
+                                }
+                            }
+                            break; 
+                        }
+                    } 
+                    else if (playerVelocity.y > 0) {
+                        const platformBottomY = platform.position.y - platformHeight / 2;
+                        if (player.position.y + (PLAYER_HEIGHT / 2) > platformBottomY) {
+                            playerVelocity.y = 0;
+                            player.position.y = platformBottomY - (PLAYER_HEIGHT / 2) - COLLISION_EPSILON; 
+                        }
+                    }
+                }
+            }
+            
+            currentGroundedPlatform = isGrounded ? platformLandedOnThisFrame : null;
+
+            if (player.position.y < -10) { 
+                isGameActive = false;
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    showMessage("Game Over", `You fell into the void! Restarting from Checkpoint. Press 'Stop & Download' to save this clip, or 'Try Again' to continue recording on a new life.`, true);
+                } else {
+                    showMessage("Game Over", "You fell into the void! Restarting from Checkpoint.", true);
+                }
+                if (crown) crown.visible = false;
+                return; 
+            }
+
+            if (currentGroundedPlatform === finishLine) {
+                 isGameActive = false;
+                 // Set final checkpoint index to signal completion
+                 checkpointPlatformIndex = TOTAL_PLATFORMS; 
+                 saveProgress();
+                 
+                 if (crown) { crown.visible = !isFirstPerson; }
+                 
+                 showMessage("CONGRATULATIONS!", `You, ${displayName}, successfully completed the 100-platform Obby! Press 'Stop & Download' to save your victory clip.`, true);
+                 return;
+            }
+        }
+
+        function updateCamera() {
+            if (!isFirstPerson) {
+                const angle = player.rotation.y;
+                const cameraTargetX = player.position.x - CAMERA_DISTANCE * Math.sin(angle);
+                const cameraTargetZ = player.position.z - CAMERA_DISTANCE * Math.cos(angle);
+                const cameraTargetY = player.position.y + CAMERA_HEIGHT;
+
+                const targetPosition = new THREE.Vector3(cameraTargetX, cameraTargetY, cameraTargetZ);
+                const lookAtTarget = new THREE.Vector3(player.position.x, player.position.y + PLAYER_HEIGHT * 0.5, player.position.z);
+                
+                camera.position.lerp(targetPosition, 0.1);
+                camera.lookAt(lookAtTarget);
+
+            } else {
+                const eyeLevelY = player.position.y + PLAYER_HEIGHT * 0.7; 
+                camera.position.set(player.position.x, eyeLevelY, player.position.z);
+
+                const lookDirection = new THREE.Vector3(0, 0, 1);
+                lookDirection.applyEuler(player.rotation); 
+
+                const lookTarget = new THREE.Vector3().addVectors(player.position, lookDirection.multiplyScalar(5));
+                lookTarget.y = eyeLevelY;
+                
+                camera.lookAt(lookTarget);
+            }
+        }
+
+        function animate(timestamp) {
+            requestAnimationFrame(animate);
+
+            if (!lastUpdateTime) lastUpdateTime = timestamp; 
+            const currentTime = performance.now();
+            let deltaTime = (currentTime - lastUpdateTime) / 1000;
+            lastUpdateTime = currentTime;
+
+            const maxDeltaTime = 1 / 30; 
+            if (deltaTime > maxDeltaTime) { deltaTime = maxDeltaTime; }
+
+
+            if (isGameActive && deltaTime > 0) { 
+                if (graceFramesRemaining > 0) {
+                    player.position.copy(checkpointPosition); 
+                    snapCameraToPlayer(); 
+                    graceFramesRemaining--;
+                    
+                    if (graceFramesRemaining <= 0) {
+                        playerVelocity.set(0, 0, 0); 
+                        isGrounded = true;
+                    }
+
+                } else {
+                    updatePlayer(deltaTime);
+                    updateCamera();
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Media Recording Logic ---
+        
+        function setupRecording() {
+            const canvas = renderer.domElement;
+            const recordButton = document.getElementById('recordButton');
+            
+            if (!('MediaRecorder' in window)) {
+                recordButton.disabled = true;
+                recordButton.innerText = "❌ Recording Unsupported";
+                recordButton.classList.add('unsupported');
+                return;
+            }
+
+            try {
+                const stream = canvas.captureStream(60); 
+                
+                let options = { mimeType: 'video/webm; codecs=vp9' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options = { mimeType: 'video/webm; codecs=vp8' };
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                         options = { mimeType: 'video/webm' };
+                    }
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const recordButton = document.getElementById('recordButton');
+                    const stopButton = document.getElementById('stopButton');
+                    const downloadMessage = document.getElementById('downloadMessage');
+                    
+                    recordButton.innerText = "🔴 Record Gameplay";
+                    recordButton.style.display = 'inline-block';
+                    stopButton.style.display = 'none';
+
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    recordedChunks = [];
+                    
+                    const url = URL.createObjectURL(blob);
+                    
+                    const durationMs = performance.now() - recordingStartTime;
+                    const durationSeconds = Math.round(durationMs / 1000);
+                    const filename = `obby_gameplay_${durationSeconds}s.webm`;
+
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+
+                    const downloadLink = document.getElementById('downloadLink');
+                    downloadLink.href = url;
+                    downloadLink.download = filename; 
+                    downloadLink.textContent = `💾 Download Ready: Click here or right-click to save (${filename})`; 
+                    
+                    downloadMessage.style.display = 'block';
+                    downloadMessage.classList.add('manual-download-required'); 
+
+                    setTimeout(() => {
+                        window.URL.revokeObjectURL(url);
+                        document.getElementById('downloadMessage').style.display = 'none';
+                    }, 300000); 
+                };
+
+            } catch (e) {
+                console.error('Error setting up MediaRecorder:', e);
+                recordButton.disabled = true;
+                recordButton.innerText = "❌ Recording Failed Setup";
+                recordButton.classList.add('unsupported');
+            }
+        }
+
+        window.startRecording = () => {
+            if (mediaRecorder && mediaRecorder.state !== 'recording') {
+                if (mediaRecorder.state === 'inactive') {
+                    recordedChunks = [];
+                    recordingStartTime = performance.now();
+                }
+                mediaRecorder.start();
+                document.getElementById('recordButton').style.display = 'none';
+                document.getElementById('stopButton').style.display = 'inline-block';
+                document.getElementById('downloadMessage').style.display = 'none'; 
+                
+                document.getElementById('stopButton').classList.add('bg-orange-500', 'shadow-orange-700');
+                document.getElementById('stopButton').classList.remove('bg-gray-500', 'shadow-gray-700');
+            }
+        };
+
+        window.stopRecording = () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                document.getElementById('stopButton').classList.remove('bg-orange-500', 'shadow-orange-700');
+                document.getElementById('stopButton').classList.add('bg-gray-500', 'shadow-gray-700');
+            }
+        };
+
+
+        /**
+         * Starts the game, either continuing from checkpoint or resetting to start.
+         * @param {boolean} shouldReset If true, resets checkpoint locally and saves (clears) progress.
+         */
+        window.startGame = (shouldReset = false) => {
+            if (!isAuthReady || !isProgressLoaded || displayName === 'Player') {
+                console.error("Game cannot start yet. Name not set or waiting for data.");
+                return;
+            }
+            
+            if (shouldReset) {
+                resetLocalStateToStart(); 
+                saveProgress(); // Overwrite public save with index 0
+                console.log("[Game Start] Starting new game, progress reset locally and saved.");
+            } else {
+                console.log("[Game Start] Continuing from loaded checkpoint.");
+            }
+
+            document.getElementById('message').style.display = 'none';
+            document.getElementById('controls').style.display = 'flex'; 
+            document.getElementById('levelMessage').style.display = 'none';
+            
+            // RESPAWN AT CHECKPOINT
+            player.position.copy(checkpointPosition);
+            
+            // --- DEBUG LOGGING ---
+            console.log(`[Game Start] Teleporting to Index: ${checkpointPlatformIndex}, Pos: (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})`);
+
+
+            player.rotation.y = 0;
+            
+            isFirstPerson = false;
+            player.visible = true; 
+
+            if (crown) { 
+                crown.visible = checkpointPlatformIndex === TOTAL_PLATFORMS; 
+            }
+            
+            currentLevelIndex = checkpointPlatformIndex; 
+            coyoteTimeRemaining = 0; 
+            snapCameraToPlayer(); 
+            playerVelocity.set(0, 0, 0); 
+            isGrounded = true; 
+            
+            if (checkpointPlatformIndex >= 0 && platforms[checkpointPlatformIndex]) {
+                currentGroundedPlatform = platforms[checkpointPlatformIndex];
+            } else {
+                 currentGroundedPlatform = null;
+            }
+            
+            graceFramesRemaining = 30; 
+            controls = { forward: false, backward: false, left: false, right: false, jump: false };
+
+            lastUpdateTime = performance.now(); 
+            isGameActive = true; 
+        };
+        
+        /**
+         * Reads the input name, updates global state, saves the name privately, and then loads/starts the game publicly.
+         */
+        window.setPlayerNameAndLoad = async () => {
+            const input = document.getElementById('playerNameInput');
+            let name = input.value.trim();
+            
+            if (name.length === 0) {
+                const tempName = 'Guest' + Math.floor(Math.random() * 1000);
+                input.value = tempName;
+                name = tempName;
+            } else if (name.length > 20) {
+                name = name.substring(0, 20); 
+            }
+            
+            displayName = name;
+
+            // 1. Save name to private profile (for next time on this device)
+            await saveDisplayName(); 
+            
+            // 2. Try loading progress for the newly set name (cross-device)
+            const progressFoundIndex = await loadProgress(); 
+            
+            // 3. If no progress was found, set start point and save initial progress
+            if (progressFoundIndex < 0) {
+                resetLocalStateToStart();
+                await saveProgress();
+            }
+
+            // 4. Update the UI - this will now show the Continue/Restart choice if progressFoundIndex >= 0
+            updateMessageForStart(progressFoundIndex >= 0); 
+        };
+
+
+        window.onload = init;
+
+    </script>
+</body>
+</html>
